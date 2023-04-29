@@ -16,7 +16,7 @@ mod task;
 
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
-use crate::mm::{PageTableEntry, VirtPageNum};
+use crate::mm::VirtPageNum;
 use crate::sync::UPSafeCell;
 // use crate::timer::get_time;
 use crate::timer::get_time_us;
@@ -193,12 +193,6 @@ impl TaskManager {
         inner.tasks[current].task_syscall_times[syscall_id] += 1;
     }
 
-    /// Translate a virtual page number to a page table entry
-    fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
-        let inner = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].translate(vpn)
-    }
-
     /// apply for a block of memory [start, start + len) with permission port
     fn mmap(&self, start: usize, len: usize, port: usize) -> Option<(VirtPageNum, VirtPageNum)> {
         let mut inner = self.inner.exclusive_access();
@@ -275,11 +269,6 @@ pub fn get_current_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
 /// Increment the count of syscall.
 pub fn increase_syscall_times(syscall_id: usize) {
     TASK_MANAGER.increase_syscall_times(syscall_id);
-}
-
-/// Translate a virtual page number to a page table entry
-pub fn translate(vpn: VirtPageNum) -> Option<PageTableEntry> {
-    TASK_MANAGER.translate(vpn)
 }
 
 /// apply for a block of memory [start, start + len) with permission port
