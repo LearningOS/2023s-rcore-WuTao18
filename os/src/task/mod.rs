@@ -16,8 +16,10 @@ mod task;
 
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{PageTableEntry, VirtPageNum};
 use crate::sync::UPSafeCell;
-use crate::timer::get_time;
+// use crate::timer::get_time;
+use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -82,7 +84,7 @@ impl TaskManager {
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
         if next_task.task_start_time.is_none() {
-            next_task.task_start_time = Some(get_time());
+            next_task.task_start_time = Some(get_time_us());
         }
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
@@ -146,7 +148,7 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             if inner.tasks[next].task_start_time.is_none() {
-                inner.tasks[next].task_start_time = Some(get_time());
+                inner.tasks[next].task_start_time = Some(get_time_us());
             }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
@@ -169,14 +171,14 @@ impl TaskManager {
         inner.tasks[current].task_start_time
     }
 
-    /// Get the syscall times of current task 
+    /// Get the syscall times of current task
     fn get_syscall_times(&self) -> [u32; MAX_SYSCALL_NUM] {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_syscall_times.clone()
     }
 
-    /// Set the syscall times of current task 
+    /// Set the syscall times of current task
     #[allow(dead_code)]
     fn set_syscall_times(&self, syscall_id: usize, syscall_times: u32) {
         let mut inner = self.inner.exclusive_access();
@@ -189,6 +191,26 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_syscall_times[syscall_id] += 1;
+    }
+
+    /// Translate a virtual page number to a page table entry
+    fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].translate(vpn)
+    }
+
+    /// apply for a block of memory [start, start + len) with permission port
+    fn mmap(&self, start: usize, len: usize, port: usize) -> Option<(VirtPageNum, VirtPageNum)> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].mmap(start, len, port)
+    }
+
+    /// remove a block of memory [start, start + len)
+    fn munmap(&self, start: usize, len: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].munmap(start, len)
     }
 }
 
@@ -245,7 +267,7 @@ pub fn get_current_start_time() -> Option<usize> {
     TASK_MANAGER.get_start_time()
 }
 
-/// Set the syscall times of current task 
+/// Set the syscall times of current task
 pub fn get_current_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
     TASK_MANAGER.get_syscall_times()
 }
@@ -253,4 +275,19 @@ pub fn get_current_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
 /// Increment the count of syscall.
 pub fn increase_syscall_times(syscall_id: usize) {
     TASK_MANAGER.increase_syscall_times(syscall_id);
+}
+
+/// Translate a virtual page number to a page table entry
+pub fn translate(vpn: VirtPageNum) -> Option<PageTableEntry> {
+    TASK_MANAGER.translate(vpn)
+}
+
+/// apply for a block of memory [start, start + len) with permission port
+pub fn mmap(start: usize, len: usize, port: usize) -> Option<(VirtPageNum, VirtPageNum)> {
+    TASK_MANAGER.mmap(start, len, port)
+}
+
+/// remove a block of memory [start, start + len)
+pub fn munmap(start: usize, len: usize) -> bool {
+    TASK_MANAGER.munmap(start, len)
 }
