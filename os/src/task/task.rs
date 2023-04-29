@@ -1,8 +1,9 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{
-    kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
+    kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr,
+    VirtPageNum, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
 
@@ -13,6 +14,12 @@ pub struct TaskControlBlock {
 
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
+
+    /// The task start time
+    pub task_start_time: Option<usize>,
+
+    /// The numbers of syscall called by task
+    pub task_syscall_times: [u32; MAX_SYSCALL_NUM],
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -58,6 +65,8 @@ impl TaskControlBlock {
         let task_control_block = Self {
             task_status,
             task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+            task_start_time: None,
+            task_syscall_times: [0; MAX_SYSCALL_NUM],
             memory_set,
             trap_cx_ppn,
             base_size: user_sp,
@@ -95,6 +104,47 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+    /// apply for a block of memory [start, start + len) with permission port
+    pub fn mmap(
+        &mut self,
+        start: usize,
+        len: usize,
+        port: usize,
+    ) -> Option<(VirtPageNum, VirtPageNum)> {
+        if (port & (!0x7)) != 0 || (port & 0x7) == 0 {
+            return None;
+        }
+        // TODO: only check areas vpn_range in memory_set.rs?
+        for virt_addr in start..start + len {
+            let vpn = VirtAddr::from(virt_addr).floor();
+            if let Some(pte) = self.memory_set.translate(vpn) {
+                if pte.is_valid() {
+                    return None;
+                }
+            }
+        }
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        let mut map_perm = MapPermission::U;
+        if port & 1 == 1 {
+            map_perm |= MapPermission::R;
+        }
+        if (port >> 1) & 1 == 1 {
+            map_perm |= MapPermission::W;
+        }
+        if (port >> 2) & 1 == 1 {
+            map_perm |= MapPermission::X;
+        }
+        self.memory_set
+            .insert_framed_area(start_va, end_va, map_perm);
+        Some((start_va.floor(), end_va.ceil()))
+    }
+    /// remove a block of memory [start, start + len)
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        self.memory_set.remove_area(start_va, end_va)
     }
 }
 
