@@ -1,8 +1,8 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, VirtPageNum, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -49,6 +49,12 @@ pub struct TaskControlBlockInner {
 
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
+
+    /// The task start time
+    pub task_start_time: Option<usize>,
+
+    /// The numbers of syscall called by task
+    pub task_syscall_times: [u32; MAX_SYSCALL_NUM],
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -112,6 +118,8 @@ impl TaskControlBlock {
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
+                    task_start_time: None,
+                    task_syscall_times: [0; MAX_SYSCALL_NUM],
                     memory_set,
                     parent: None,
                     children: Vec::new(),
@@ -185,6 +193,8 @@ impl TaskControlBlock {
                     base_size: parent_inner.base_size,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
+                    task_start_time: parent_inner.task_start_time,
+                    task_syscall_times: parent_inner.task_syscall_times.clone(),
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
@@ -235,6 +245,77 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// Get the start time of current task
+    pub fn get_start_time(&self) -> Option<usize> {
+        let inner = self.inner.exclusive_access();
+        inner.task_start_time
+    }
+
+    /// Get the syscall times of current task
+    pub fn get_syscall_times(&self) -> [u32; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
+        inner.task_syscall_times.clone()
+    }
+
+    /// Set the syscall times of current task
+    #[allow(dead_code)]
+    pub fn set_syscall_times(&self, syscall_id: usize, syscall_times: u32) {
+        let mut inner = self.inner.exclusive_access();
+        inner.task_syscall_times[syscall_id] = syscall_times;
+    }
+
+    /// Increment the count of syscall.
+    pub fn increase_syscall_times(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.task_syscall_times[syscall_id] += 1;
+    }
+
+    /// apply for a block of memory [start, start + len) with permission port
+    pub fn mmap(
+        &self,
+        start: usize,
+        len: usize,
+        port: usize,
+    ) -> Option<(VirtPageNum, VirtPageNum)> {
+        if (port & (!0x7)) != 0 || (port & 0x7) == 0 {
+            return None;
+        }
+        let mut inner = self.inner_exclusive_access();
+        // TODO: only check areas vpn_range in memory_set.rs?
+        for virt_addr in start..start + len {
+            let vpn = VirtAddr::from(virt_addr).floor();
+            if let Some(pte) = inner.memory_set.translate(vpn) {
+                if pte.is_valid() {
+                    return None;
+                }
+            }
+        }
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        let mut map_perm = MapPermission::U;
+        if port & 1 == 1 {
+            map_perm |= MapPermission::R;
+        }
+        if (port >> 1) & 1 == 1 {
+            map_perm |= MapPermission::W;
+        }
+        if (port >> 2) & 1 == 1 {
+            map_perm |= MapPermission::X;
+        }
+        inner
+            .memory_set
+            .insert_framed_area(start_va, end_va, map_perm);
+        Some((start_va.floor(), end_va.ceil()))
+    }
+
+    /// remove a block of memory [start, start + len)
+    pub fn munmap(&self, start: usize, len: usize) -> bool {
+        let mut inner = self.inner_exclusive_access();
+        let start_va = VirtAddr(start);
+        let end_va = VirtAddr(start + len);
+        inner.memory_set.remove_area(start_va, end_va)
     }
 }
 
