@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE, INIT_STRIDE, INIT_PRIORITY};
 use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, VirtPageNum, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -74,6 +74,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// For stride scheduling algorithm
+    pub stride: isize,
+
+    /// For stride scheduling algorithm
+    pub priority: isize,
 }
 
 impl TaskControlBlockInner {
@@ -126,6 +132,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: INIT_STRIDE,
+                    priority: INIT_PRIORITY,
                 })
             },
         };
@@ -201,6 +209,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: INIT_STRIDE,
+                    priority: INIT_PRIORITY,
                 })
             },
         });
@@ -239,14 +249,16 @@ impl TaskControlBlock {
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
-                    task_start_time: parent_inner.task_start_time,
-                    task_syscall_times: parent_inner.task_syscall_times.clone(),
+                    task_start_time: None,
+                    task_syscall_times: [0; MAX_SYSCALL_NUM],
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: INIT_STRIDE,
+                    priority: INIT_PRIORITY,
                 })
             },
         });
@@ -368,6 +380,30 @@ impl TaskControlBlock {
         let start_va = VirtAddr(start);
         let end_va = VirtAddr(start + len);
         inner.memory_set.remove_area(start_va, end_va)
+    }
+
+    /// get task priority
+    pub fn get_priority(&self) -> isize {
+        let inner = self.inner_exclusive_access();
+        inner.priority
+    }
+
+    /// set task priority
+    pub fn set_priority(&self, prio: isize) {
+        let mut inner = self.inner_exclusive_access();
+        inner.priority = prio;
+    }
+
+    /// get task stride
+    pub fn get_stride(&self) -> isize {
+        let inner = self.inner_exclusive_access();
+        inner.stride
+    }
+
+    /// set task stride
+    pub fn set_stride(&self, stride: isize) {
+        let mut inner = self.inner_exclusive_access();
+        inner.stride = stride;
     }
 }
 
