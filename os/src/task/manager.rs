@@ -39,9 +39,6 @@ impl TaskManager {
                 let stride = task.get_stride();
                 let priority = task.get_priority();
                 let pass = BIG_STRIDE / priority;
-                // if priority == 5 {
-                //     println!("pass: {}, stride + pass: {}", pass, stride + pass);
-                // }
                 task.set_stride(stride + pass);
                 Some(task)
             }
