@@ -122,16 +122,27 @@ impl Inode {
         self.modify_disk_inode(|root_inode| {
             // append file in the dirent
             let file_count = (root_inode.size as usize) / DIRENT_SZ;
-            let new_size = (file_count + 1) * DIRENT_SZ;
-            // increase size
-            self.increase_size(new_size as u32, root_inode, &mut fs);
-            // write dirent
+            let mut i = 0;
+            while i < file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent == DirEntry::empty() {
+                    break;
+                }
+                i += 1;
+            }
             let dirent = DirEntry::new(name, new_inode_id);
-            root_inode.write_at(
-                file_count * DIRENT_SZ,
-                dirent.as_bytes(),
-                &self.block_device,
-            );
+            // no empty dir entry
+            if i >= file_count {
+                let new_size = (file_count + 1) * DIRENT_SZ;
+                // increase size
+                self.increase_size(new_size as u32, root_inode, &mut fs);
+            }
+            // write dirent
+            root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
         });
 
         let (block_id, block_offset) = fs.get_disk_inode_pos(new_inode_id);
@@ -176,16 +187,31 @@ impl Inode {
                 self.modify_disk_inode(|root_inode| {
                     // append file in the dirent
                     let file_count = (root_inode.size as usize) / DIRENT_SZ;
-                    let new_size = (file_count + 1) * DIRENT_SZ;
-                    // increase size
-                    self.increase_size(new_size as u32, root_inode, &mut fs);
-                    // write dirent
+                    let mut i = 0;
+                    while i < file_count {
+                        let mut dirent = DirEntry::empty();
+                        assert_eq!(
+                            root_inode.read_at(
+                                i * DIRENT_SZ,
+                                dirent.as_bytes_mut(),
+                                &self.block_device,
+                            ),
+                            DIRENT_SZ,
+                        );
+                        if dirent == DirEntry::empty() {
+                            break;
+                        }
+                        i += 1;
+                    }
                     let dirent = DirEntry::new(new_name, inode_id);
-                    root_inode.write_at(
-                        file_count * DIRENT_SZ,
-                        dirent.as_bytes(),
-                        &self.block_device,
-                    );
+                    // no empty dir entry
+                    if i >= file_count {
+                        let new_size = (file_count + 1) * DIRENT_SZ;
+                        // increase size
+                        self.increase_size(new_size as u32, root_inode, &mut fs);
+                    }
+                    // write dirent
+                    root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
                 });
                 block_cache_sync_all();
                 true
