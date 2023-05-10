@@ -32,6 +32,7 @@ impl Semaphore {
     /// up operation of semaphore
     pub fn up(&self) {
         trace!("kernel: Semaphore::up");
+        println!("Semaphore::up");
         let mut inner = self.inner.exclusive_access();
         inner.count += 1;
         if inner.count <= 0 {
@@ -44,9 +45,11 @@ impl Semaphore {
     /// down operation of semaphore
     pub fn down(&self) {
         trace!("kernel: Semaphore::down");
+        println!("Semaphore::down");
         let mut inner = self.inner.exclusive_access();
         inner.count -= 1;
         if inner.count < 0 {
+            println!("inner.count: {}", inner.count);
             inner.wait_queue.push_back(current_task().unwrap());
             drop(inner);
             block_current_and_run_next();
