@@ -257,7 +257,6 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
             .unwrap()
             .tid
     );
-    println!("sys_semaphore_up");
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
@@ -314,28 +313,15 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
                 .or_insert(1);
         })
         .or_insert(BTreeMap::from([(sem_id, 1)]));
-    println!(
-        "tid: {}, sem_id: {}, sem_need: {:?}, sem_allocation: {:?}",
-        tid, sem_id, process_inner.sem_need, process_inner.sem_allocation
-    );
     if process_inner.deadlock_detect_enabled {
         let mut work = process_inner.sem_available.clone();
-        println!("before work: {:?}", work);
         let mut unfinished = BTreeSet::<usize>::new();
         for task_id in process_inner.sem_allocation.keys() {
             unfinished.insert(*task_id);
         }
-        // for task in &process_inner.tasks {
-        //     if let Some(task) = task {
-        //         if let Some(res) = task.inner_exclusive_access().res.as_ref() {
-        //             unfinished.insert(res.tid);
-        //         }
-        //     }
-        // }
         for task_id in process_inner.sem_need.keys() {
             unfinished.insert(*task_id);
         }
-        // println!("unfinished: {:?}", unfinished);
         loop {
             let mut t = None;
             // step 2
@@ -343,13 +329,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
                 let mut flag = true;
                 if let Some(sem_need) = process_inner.sem_need.get(unfinished_tid) {
                     for (sid, need) in sem_need.iter() {
-                        println!(
-                            "unfinished_tid: {}, sid: {}, need: {}, work: {:?}",
-                            unfinished_tid, *sid, *need, work
-                        );
-                        // if *need > work[*sid] || work[*sid] == 0 {
                         if *need > work[*sid] {
-                            println!("work[*sid]: {:?}", work[*sid]);
                             flag = false;
                             break;
                         }
@@ -373,19 +353,16 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
                 if unfinished.is_empty() {
                     break;
                 } else {
-                    println!("deadlock! unfinished: {:?}", unfinished);
                     return -0xdead;
                 }
             }
         }
-        println!("after work: {:?}", work);
     }
     drop(process_inner);
     sem.down();
 
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    println!("sem_available: {:?}", process_inner.sem_available[sem_id]);
     process_inner.sem_available[sem_id] -= 1;
     process_inner
         .sem_allocation
