@@ -7,9 +7,8 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
-use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
+use crate::sync::{Condvar, DeadlockChecker, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -50,20 +49,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
-    // is deadlock detect enabled
+    /// is deadlock detect enabled
     pub deadlock_detect_enabled: bool,
-    // Available mutex
-    pub mutex_available: Vec<usize>,
-    // Mutex allocation
-    pub mutex_allocation: BTreeMap<usize, BTreeMap<usize, usize>>,
-    // Mutex need
-    pub mutex_need: BTreeMap<usize, BTreeMap<usize, usize>>,
-    // Available semaphore
-    pub sem_available: Vec<usize>,
-    // Semaphore allocation
-    pub sem_allocation: BTreeMap<usize, BTreeMap<usize, usize>>,
-    // Semaphore need
-    pub sem_need: BTreeMap<usize, BTreeMap<usize, usize>>,
+    /// mutex deadlock checker
+    pub mutex_deadlock_checker: DeadlockChecker,
+    /// semaphore deadlock checker
+    pub sem_deadlock_checker: DeadlockChecker,
 }
 
 impl ProcessControlBlockInner {
@@ -139,12 +130,8 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     deadlock_detect_enabled: false,
-                    mutex_available: Vec::new(),
-                    mutex_allocation: BTreeMap::new(),
-                    mutex_need: BTreeMap::new(),
-                    sem_available: Vec::new(),
-                    sem_allocation: BTreeMap::new(),
-                    sem_need: BTreeMap::new(),
+                    mutex_deadlock_checker: DeadlockChecker::new(),
+                    sem_deadlock_checker: DeadlockChecker::new(),
                 })
             },
         });
@@ -272,12 +259,8 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     deadlock_detect_enabled: false,
-                    mutex_available: Vec::new(),
-                    mutex_allocation: BTreeMap::new(),
-                    mutex_need: BTreeMap::new(),
-                    sem_available: Vec::new(),
-                    sem_allocation: BTreeMap::new(),
-                    sem_need: BTreeMap::new(),
+                    mutex_deadlock_checker: DeadlockChecker::new(),
+                    sem_deadlock_checker: DeadlockChecker::new(),
                 })
             },
         });
